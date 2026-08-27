@@ -53,6 +53,20 @@ interface SetEntry {
   reps: string;
 }
 
+// Función auxiliar para obtener la fecha YYYY-MM-DD del día de la semana actual
+function getDateOfWeekDay(targetDayId: number, baseDate: Date = new Date()): string {
+  const current = new Date(baseDate);
+  const currentJsDay = current.getDay(); // 0 Dom, 1 Lun ... 6 Sab
+  const currentNormalized = currentJsDay === 0 ? 7 : currentJsDay; // 1 Lun ... 7 Dom
+  const diff = targetDayId - currentNormalized;
+  current.setDate(current.getDate() + diff);
+
+  const yyyy = current.getFullYear();
+  const mm = String(current.getMonth() + 1).padStart(2, '0');
+  const dd = String(current.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export default function GymTrackerApp() {
   const [activeTab, setActiveTab] = useState<'today' | 'calendar' | 'charts' | 'timer'>('today');
   const [routineDays, setRoutineDays] = useState<RoutineDay[]>([]);
@@ -80,10 +94,10 @@ export default function GymTrackerApp() {
   const [modalExUnit, setModalExUnit] = useState<'kg' | 'placas'>('kg');
 
   // Estado del Cronómetro y Temporizador
-  const [timerMode, setTimerMode] = useState<'stopwatch' | 'countdown'>('countdown');
+  const [timerMode, setTimerMode] = useState<'countdown' | 'stopwatch'>('countdown');
   const [stopwatchTime, setStopwatchTime] = useState(0);
   const [isStopwatchRunning, setIsStopwatchRunning] = useState(false);
-  const [countdownTime, setCountdownTime] = useState(60); // 1 min por defecto
+  const [countdownTime, setCountdownTime] = useState(60);
   const [initialCountdown, setInitialCountdown] = useState(60);
   const [isCountdownRunning, setIsCountdownRunning] = useState(false);
 
@@ -103,13 +117,10 @@ export default function GymTrackerApp() {
     setCalendarViewDate(today);
 
     const jsDay = today.getDay();
-    if (jsDay >= 1 && jsDay <= 5) {
-      setSelectedDayId(jsDay);
-    } else {
-      setSelectedDayId(1);
-    }
+    const initDayId = jsDay >= 1 && jsDay <= 5 ? jsDay : 1;
+    setSelectedDayId(initDayId);
     
-    fetchInitialData(dateStr);
+    fetchInitialData(dateStr, initDayId);
   }, []);
 
   // Lógica del Cronómetro
@@ -151,7 +162,7 @@ export default function GymTrackerApp() {
     return new Date(selectedDateStr) > new Date(todayDateStr);
   }, [selectedDateStr, todayDateStr]);
 
-  const fetchInitialData = async (targetDate: string) => {
+  const fetchInitialData = async (targetDate: string, targetDayId: number) => {
     setLoading(true);
     const { data: days } = await supabase.from('routine_days').select('*').order('id');
     const { data: exs } = await supabase.from('exercises').select('*').order('sort_order');
@@ -165,7 +176,7 @@ export default function GymTrackerApp() {
     if (exs) {
       setExercises(exs);
       if (exs.length > 0 && !chartExerciseId) setChartExerciseId(exs[0].id);
-      await loadDayData(exs, targetDate);
+      await loadDayData(exs, targetDate, targetDayId);
     }
 
     if (logsWithSets) {
@@ -179,14 +190,15 @@ export default function GymTrackerApp() {
     setLoading(false);
   };
 
-  // Carga los datos dentro de las casillas (inputs) de la fecha seleccionada
-  const loadDayData = async (exList: Exercise[], targetDate: string) => {
-    const localDraftKey = `workout_draft_${targetDate}`;
+  // Carga los datos dentro de las casillas de la fecha y día
+  const loadDayData = async (exList: Exercise[], targetDate: string, dayId: number) => {
+    const localDraftKey = `workout_draft_${targetDate}_${dayId}`;
     const localDraft = typeof window !== 'undefined' ? localStorage.getItem(localDraftKey) : null;
 
+    // Buscar logs tanto por fecha exacta como por el día si se guardó recientemente
     const { data: existingLogs } = await supabase
       .from('workout_logs')
-      .select('id, exercise_id, workout_sets(set_number, weight, unit, reps)')
+      .select('id, exercise_id, workout_date, workout_sets(set_number, weight, unit, reps)')
       .eq('workout_date', targetDate);
 
     const logsByExId = (existingLogs || []).reduce((acc: any, item: any) => {
@@ -245,6 +257,14 @@ export default function GymTrackerApp() {
     if (data) setAllHistory(data);
   };
 
+  // Cambio de pestaña de día (LUN a VIE) -> recalcula la fecha de ese día de la semana
+  const handleSelectDay = (dayId: number) => {
+    setSelectedDayId(dayId);
+    const calculatedDate = getDateOfWeekDay(dayId);
+    setSelectedDateStr(calculatedDate);
+    loadDayData(exercises, calculatedDate, dayId);
+  };
+
   const handleInputChange = (
     exerciseId: string,
     setIndex: number,
@@ -276,7 +296,7 @@ export default function GymTrackerApp() {
       const updatedForm = { ...prev, [exerciseId]: sets };
 
       if (typeof window !== 'undefined' && selectedDateStr) {
-        localStorage.setItem(`workout_draft_${selectedDateStr}`, JSON.stringify(updatedForm));
+        localStorage.setItem(`workout_draft_${selectedDateStr}_${selectedDayId}`, JSON.stringify(updatedForm));
       }
 
       return updatedForm;
@@ -337,7 +357,7 @@ export default function GymTrackerApp() {
       }
 
       if (typeof window !== 'undefined') {
-        localStorage.removeItem(`workout_draft_${selectedDateStr}`);
+        localStorage.removeItem(`workout_draft_${selectedDateStr}_${selectedDayId}`);
       }
 
       await loadAllHistory();
@@ -451,10 +471,9 @@ export default function GymTrackerApp() {
     setSelectedDateStr(dateStr);
     const d = new Date(dateStr + 'T00:00:00');
     const dayOfWeek = d.getDay();
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-      setSelectedDayId(dayOfWeek);
-    }
-    loadDayData(exercises, dateStr);
+    const calculatedDayId = dayOfWeek >= 1 && dayOfWeek <= 5 ? dayOfWeek : 1;
+    setSelectedDayId(calculatedDayId);
+    loadDayData(exercises, dateStr, calculatedDayId);
     setActiveTab('today');
   };
 
@@ -533,9 +552,7 @@ export default function GymTrackerApp() {
               return (
                 <button
                   key={d.id}
-                  onClick={() => {
-                    setSelectedDayId(d.id);
-                  }}
+                  onClick={() => handleSelectDay(d.id)}
                   className={`py-2 px-1 rounded-xl text-center transition-all ${
                     isSelected 
                       ? 'bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/20' 
@@ -555,7 +572,7 @@ export default function GymTrackerApp() {
                 {currentDayInfo?.day_name} • <span className="text-amber-400">{currentDayInfo?.muscle_group}</span>
               </h2>
               <p className="text-[11px] text-zinc-400">
-                {filledCount} de {currentExercises.length} ejercicios anotados
+                {filledCount} de {currentExercises.length} ejercicios anotados ({selectedDateStr})
               </p>
             </div>
             <button
@@ -681,7 +698,7 @@ export default function GymTrackerApp() {
                   ) : (
                     <>
                       <Save className="w-5 h-5" />
-                      <span>Guardar Entrenamiento del Día</span>
+                      <span>Guardar Entrenamiento ({selectedDateStr})</span>
                     </>
                   )}
                 </button>
@@ -790,7 +807,6 @@ export default function GymTrackerApp() {
         {/* VISTA 4: CRONÓMETRO Y TEMPORIZADOR */}
         {activeTab === 'timer' && (
           <div className="space-y-4">
-            {/* Selector de Modo */}
             <div className="grid grid-cols-2 gap-2 bg-zinc-900 p-1.5 rounded-2xl border border-zinc-800">
               <button
                 onClick={() => setTimerMode('countdown')}
@@ -810,7 +826,6 @@ export default function GymTrackerApp() {
               </button>
             </div>
 
-            {/* MODO TEMPORIZADOR */}
             {timerMode === 'countdown' && (
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center">
                 <p className="text-xs text-zinc-400 mb-2">Descanso entre series</p>
@@ -818,7 +833,6 @@ export default function GymTrackerApp() {
                   {formatTime(countdownTime)}
                 </div>
 
-                {/* Accesos rápidos */}
                 <div className="grid grid-cols-5 gap-1.5 my-5">
                   {[30, 60, 90, 120, 180].map((sec) => (
                     <button
@@ -860,7 +874,6 @@ export default function GymTrackerApp() {
               </div>
             )}
 
-            {/* MODO CRONÓMETRO */}
             {timerMode === 'stopwatch' && (
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center">
                 <p className="text-xs text-zinc-400 mb-2">Tiempo transcurrido</p>
