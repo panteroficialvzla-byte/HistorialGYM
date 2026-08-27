@@ -9,13 +9,15 @@ import {
   History, 
   Check, 
   ChevronLeft, 
-  ChevronRight,
-  Flame,
-  Plus,
-  Pencil,
-  Trash2,
-  Lock,
-  X
+  ChevronRight, 
+  Flame, 
+  Plus, 
+  Pencil, 
+  Trash2, 
+  Lock, 
+  X,
+  Save,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -66,7 +68,8 @@ export default function GymTrackerApp() {
   const [allHistory, setAllHistory] = useState<any[]>([]);
   const [chartExerciseId, setChartExerciseId] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
 
   // Modal para agregar/editar ejercicio
   const [modalExerciseOpen, setModalExerciseOpen] = useState(false);
@@ -124,7 +127,11 @@ export default function GymTrackerApp() {
   };
 
   const initFormState = async (exList: Exercise[], targetDate: string) => {
-    // Buscar si ya hay datos guardados para esta fecha
+    // 1. Verificar si hay un borrador local guardado para esta fecha
+    const localDraftKey = `workout_draft_${targetDate}`;
+    const localDraft = typeof window !== 'undefined' ? localStorage.getItem(localDraftKey) : null;
+
+    // 2. Buscar si ya hay datos guardados en Supabase
     const { data: existingLogs } = await supabase
       .from('workout_logs')
       .select('id, exercise_id, workout_sets(set_number, weight, unit, reps)')
@@ -135,26 +142,40 @@ export default function GymTrackerApp() {
       return acc;
     }, {});
 
+    let parsedDraft: Record<string, SetEntry[]> | null = null;
+    if (localDraft) {
+      try {
+        parsedDraft = JSON.parse(localDraft);
+      } catch (e) {
+        parsedDraft = null;
+      }
+    }
+
     const form: Record<string, SetEntry[]> = {};
     exList.forEach((ex) => {
-      const savedSets = logsByExId[ex.id];
-      if (savedSets && savedSets.length > 0) {
-        form[ex.id] = [1, 2, 3, 4].map((num) => {
-          const found = savedSets.find((s: any) => s.set_number === num);
-          return {
-            set_number: num,
-            weight: found ? String(found.weight) : '',
-            unit: found ? found.unit : ex.default_unit,
-            reps: found ? String(found.reps) : '',
-          };
-        });
+      // Prioridad: 1. Borrador local (en progreso), 2. Guardado en Supabase, 3. Vacío
+      if (parsedDraft && parsedDraft[ex.id]) {
+        form[ex.id] = parsedDraft[ex.id];
       } else {
-        form[ex.id] = [1, 2, 3, 4].map((num) => ({
-          set_number: num,
-          weight: '',
-          unit: ex.default_unit,
-          reps: '',
-        }));
+        const savedSets = logsByExId[ex.id];
+        if (savedSets && savedSets.length > 0) {
+          form[ex.id] = [1, 2, 3, 4].map((num) => {
+            const found = savedSets.find((s: any) => s.set_number === num);
+            return {
+              set_number: num,
+              weight: found ? String(found.weight) : '',
+              unit: found ? found.unit : ex.default_unit,
+              reps: found ? String(found.reps) : '',
+            };
+          });
+        } else {
+          form[ex.id] = [1, 2, 3, 4].map((num) => ({
+            set_number: num,
+            weight: '',
+            unit: ex.default_unit,
+            reps: '',
+          }));
+        }
       }
     });
     setFormData(form);
@@ -184,6 +205,7 @@ export default function GymTrackerApp() {
     }
   };
 
+  // Manejo de cambios y autoguardado en localStorage al instante
   const handleInputChange = (
     exerciseId: string,
     setIndex: number,
@@ -212,64 +234,93 @@ export default function GymTrackerApp() {
       }
 
       sets[setIndex] = currentSet;
-      return { ...prev, [exerciseId]: sets };
+      const updatedForm = { ...prev, [exerciseId]: sets };
+
+      // Autoguardar borrador en el teléfono
+      if (typeof window !== 'undefined' && selectedDateStr) {
+        localStorage.setItem(`workout_draft_${selectedDateStr}`, JSON.stringify(updatedForm));
+      }
+
+      return updatedForm;
     });
   };
 
-  const saveExerciseLog = async (exerciseId: string) => {
+  // GUARDAR TODO EL ENTRENAMIENTO DEL DÍA EN UN SOLO CLIC
+  const saveAllWorkoutDay = async () => {
     if (isFutureDate) {
       alert('No puedes registrar entrenamientos en días futuros.');
       return;
     }
 
-    setSavingId(exerciseId);
-    try {
-      const setsToSave = (formData[exerciseId] || []).filter(
-        (s) => s.weight !== '' && s.reps !== ''
-      );
+    setIsSavingAll(true);
+    setSavedSuccess(false);
 
-      if (setsToSave.length === 0) {
-        alert('Ingresa al menos 1 serie con peso y repeticiones.');
-        setSavingId(null);
+    try {
+      const currentDayExercises = exercises.filter((ex) => ex.day_id === selectedDayId);
+      let exercisesSavedCount = 0;
+
+      for (const ex of currentDayExercises) {
+        const setsToSave = (formData[ex.id] || []).filter(
+          (s) => s.weight !== '' && s.reps !== ''
+        );
+
+        if (setsToSave.length > 0) {
+          // 1. Crear / actualizar log
+          const { data: logData, error: logError } = await supabase
+            .from('workout_logs')
+            .upsert(
+              { workout_date: selectedDateStr, exercise_id: ex.id },
+              { onConflict: 'workout_date,exercise_id' }
+            )
+            .select()
+            .single();
+
+          if (logError) throw logError;
+
+          // 2. Limpiar y guardar series
+          await supabase.from('workout_sets').delete().eq('log_id', logData.id);
+
+          const payload = setsToSave.map((s) => ({
+            log_id: logData.id,
+            set_number: s.set_number,
+            weight: parseFloat(s.weight),
+            unit: s.unit === 'lbs' ? 'kg' : s.unit,
+            reps: parseInt(s.reps, 10),
+          }));
+
+          const { error: setsError } = await supabase.from('workout_sets').insert(payload);
+          if (setsError) throw setsError;
+
+          exercisesSavedCount++;
+        }
+      }
+
+      if (exercisesSavedCount === 0) {
+        alert('Ingresa peso y repeticiones en al menos una serie para guardar.');
+        setIsSavingAll(false);
         return;
       }
 
-      const { data: logData, error: logError } = await supabase
-        .from('workout_logs')
-        .upsert(
-          { workout_date: selectedDateStr, exercise_id: exerciseId },
-          { onConflict: 'workout_date,exercise_id' }
-        )
-        .select()
-        .single();
-
-      if (logError) throw logError;
-
-      await supabase.from('workout_sets').delete().eq('log_id', logData.id);
-
-      const payload = setsToSave.map((s) => ({
-        log_id: logData.id,
-        set_number: s.set_number,
-        weight: parseFloat(s.weight),
-        unit: s.unit === 'lbs' ? 'kg' : s.unit,
-        reps: parseInt(s.reps, 10),
-      }));
-
-      const { error: setsError } = await supabase.from('workout_sets').insert(payload);
-      if (setsError) throw setsError;
+      // Limpiar borrador local tras guardado exitoso
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(`workout_draft_${selectedDateStr}`);
+      }
 
       await loadHistoryAndLastWeights();
       if (!completedDates.includes(selectedDateStr)) {
         setCompletedDates((prev) => [...prev, selectedDateStr]);
       }
+
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      alert(`Error al guardar: ${err.message}`);
     } finally {
-      setSavingId(null);
+      setIsSavingAll(false);
     }
   };
 
-  // Gestión de Ejercicios (Crear / Editar / Eliminar)
+  // Gestión de Ejercicios
   const openModalNewExercise = () => {
     setEditingExercise(null);
     setModalExName('');
@@ -288,7 +339,6 @@ export default function GymTrackerApp() {
     if (!modalExName.trim()) return;
 
     if (editingExercise) {
-      // Actualizar
       const { error } = await supabase
         .from('exercises')
         .update({ name: modalExName.trim(), default_unit: modalExUnit })
@@ -299,7 +349,6 @@ export default function GymTrackerApp() {
         );
       }
     } else {
-      // Crear nuevo
       const maxOrder = exercises.filter((e) => e.day_id === selectedDayId).length + 1;
       const { data, error } = await supabase
         .from('exercises')
@@ -337,11 +386,11 @@ export default function GymTrackerApp() {
     }
   };
 
-  // Cálculo de días del mes en calendario real
+  // Calendario
   const calendarDays = useMemo(() => {
     const year = calendarViewDate.getFullYear();
     const month = calendarViewDate.getMonth();
-    const firstDayIndex = new Date(year, month, 1).getDay(); // 0 Dom, 1 Lun...
+    const firstDayIndex = new Date(year, month, 1).getDay();
     const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
 
     const daysArray = [];
@@ -378,6 +427,13 @@ export default function GymTrackerApp() {
   const currentExercises = exercises.filter((ex) => ex.day_id === selectedDayId);
   const currentDayInfo = routineDays.find((d) => d.id === selectedDayId);
 
+  const filledCount = useMemo(() => {
+    return currentExercises.filter((ex) => {
+      const sets = formData[ex.id] || [];
+      return sets.some((s) => s.weight !== '' && s.reps !== '');
+    }).length;
+  }, [currentExercises, formData]);
+
   const chartData = useMemo(() => {
     if (!chartExerciseId || allHistory.length === 0) return [];
     return allHistory
@@ -386,7 +442,7 @@ export default function GymTrackerApp() {
         const maxWeight = Math.max(...(h.workout_sets?.map((s: any) => Number(s.weight)) || [0]));
         const maxReps = Math.max(...(h.workout_sets?.map((s: any) => Number(s.reps)) || [0]));
         return {
-          fecha: h.workout_date.slice(5), // MM-DD
+          fecha: h.workout_date.slice(5),
           pesoMax: maxWeight,
           reps: maxReps,
           unidad: h.workout_sets?.[0]?.unit || 'kg',
@@ -396,7 +452,7 @@ export default function GymTrackerApp() {
   }, [chartExerciseId, allHistory]);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-28 font-sans">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-36 font-sans">
       {/* Barra Superior */}
       <header className="sticky top-0 z-30 bg-zinc-900/90 backdrop-blur-md border-b border-zinc-800 px-4 py-3">
         <div className="max-w-xl mx-auto flex items-center justify-between">
@@ -428,7 +484,7 @@ export default function GymTrackerApp() {
         </div>
       )}
 
-      {/* Selector de Días Lunes a Viernes */}
+      {/* Selector de Días */}
       {activeTab === 'today' && (
         <div className="max-w-xl mx-auto px-4 mt-3">
           <div className="grid grid-cols-5 gap-1 bg-zinc-900 p-1.5 rounded-2xl border border-zinc-800">
@@ -456,6 +512,9 @@ export default function GymTrackerApp() {
               <h2 className="text-base font-bold text-zinc-100">
                 {currentDayInfo?.day_name} • <span className="text-amber-400">{currentDayInfo?.muscle_group}</span>
               </h2>
+              <p className="text-[11px] text-zinc-400">
+                {filledCount} de {currentExercises.length} ejercicios anotados
+              </p>
             </div>
             <button
               onClick={openModalNewExercise}
@@ -500,18 +559,6 @@ export default function GymTrackerApp() {
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <button
-                        onClick={() => saveExerciseLog(ex.id)}
-                        disabled={savingId === ex.id || isFutureDate}
-                        className={`flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-xl transition ${
-                          isFutureDate
-                            ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                            : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                        }`}
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        {savingId === ex.id ? '...' : 'Guardar'}
-                      </button>
                     </div>
 
                     {/* Registro anterior */}
@@ -577,6 +624,37 @@ export default function GymTrackerApp() {
                   </div>
                 );
               })
+            )}
+
+            {/* BOTÓN MAESTRO DE GUARDAR ENTRENAMIENTO COMPLETO */}
+            {currentExercises.length > 0 && (
+              <div className="pt-2 pb-6">
+                <button
+                  onClick={saveAllWorkoutDay}
+                  disabled={isSavingAll || isFutureDate}
+                  className={`w-full py-3.5 px-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${
+                    isFutureDate
+                      ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      : savedSuccess
+                      ? 'bg-emerald-600 text-white shadow-emerald-600/30'
+                      : 'bg-amber-500 hover:bg-amber-400 text-zinc-950 shadow-amber-500/20 active:scale-[0.98]'
+                  }`}
+                >
+                  {isSavingAll ? (
+                    <span>Guardando progreso...</span>
+                  ) : savedSuccess ? (
+                    <>
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span>¡Entrenamiento Guardado!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-5 h-5" />
+                      <span>Guardar Entrenamiento del Día</span>
+                    </>
+                  )}
+                </button>
+              </div>
             )}
           </div>
         )}
