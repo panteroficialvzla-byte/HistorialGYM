@@ -7,7 +7,6 @@ import {
   Calendar as CalendarIcon, 
   TrendingUp, 
   Timer, 
-  Check, 
   ChevronLeft, 
   ChevronRight, 
   Flame, 
@@ -20,7 +19,9 @@ import {
   CheckCircle2,
   Play,
   Pause,
-  RotateCcw
+  RotateCcw,
+  Search,
+  ChevronDown
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -29,7 +30,8 @@ import {
   YAxis, 
   Tooltip, 
   ResponsiveContainer, 
-  CartesianGrid 
+  CartesianGrid,
+  Legend
 } from 'recharts';
 
 interface RoutineDay {
@@ -53,11 +55,10 @@ interface SetEntry {
   reps: string;
 }
 
-// Función auxiliar para obtener la fecha YYYY-MM-DD del día de la semana actual
 function getDateOfWeekDay(targetDayId: number, baseDate: Date = new Date()): string {
   const current = new Date(baseDate);
-  const currentJsDay = current.getDay(); // 0 Dom, 1 Lun ... 6 Sab
-  const currentNormalized = currentJsDay === 0 ? 7 : currentJsDay; // 1 Lun ... 7 Dom
+  const currentJsDay = current.getDay();
+  const currentNormalized = currentJsDay === 0 ? 7 : currentJsDay;
   const diff = targetDayId - currentNormalized;
   current.setDate(current.getDate() + diff);
 
@@ -93,18 +94,30 @@ export default function GymTrackerApp() {
   const [modalExName, setModalExName] = useState('');
   const [modalExUnit, setModalExUnit] = useState<'kg' | 'placas'>('kg');
 
-  // Estado del Cronómetro y Temporizador
+  // Modal selector de ejercicio para Gráficas
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
+
+  // Cronómetro y Temporizador con Milisegundos
   const [timerMode, setTimerMode] = useState<'countdown' | 'stopwatch'>('countdown');
-  const [stopwatchTime, setStopwatchTime] = useState(0);
+  const [stopwatchMs, setStopwatchMs] = useState(0);
   const [isStopwatchRunning, setIsStopwatchRunning] = useState(false);
-  const [countdownTime, setCountdownTime] = useState(60);
-  const [initialCountdown, setInitialCountdown] = useState(60);
+  const [countdownMs, setCountdownMs] = useState(60 * 1000);
+  const [initialCountdownMs, setInitialCountdownMs] = useState(60 * 1000);
   const [isCountdownRunning, setIsCountdownRunning] = useState(false);
 
   const stopwatchRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Inicialización
+  // Fecha de inicio: Lunes 10 de Agosto 2026
+  const streakDays = useMemo(() => {
+    const startDate = new Date('2026-08-10T00:00:00');
+    const today = new Date();
+    const diffTime = Math.max(0, today.getTime() - startDate.getTime());
+    const days = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    return days > 0 ? days : 17;
+  }, []);
+
   useEffect(() => {
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -123,12 +136,12 @@ export default function GymTrackerApp() {
     fetchInitialData(dateStr, initDayId);
   }, []);
 
-  // Lógica del Cronómetro
+  // Cronómetro con milisegundos (intervalo a 10ms)
   useEffect(() => {
     if (isStopwatchRunning) {
       stopwatchRef.current = setInterval(() => {
-        setStopwatchTime((prev) => prev + 1);
-      }, 1000);
+        setStopwatchMs((prev) => prev + 10);
+      }, 10);
     } else if (stopwatchRef.current) {
       clearInterval(stopwatchRef.current);
     }
@@ -137,25 +150,28 @@ export default function GymTrackerApp() {
     };
   }, [isStopwatchRunning]);
 
-  // Lógica del Temporizador
+  // Temporizador con milisegundos
   useEffect(() => {
-    if (isCountdownRunning && countdownTime > 0) {
+    if (isCountdownRunning && countdownMs > 0) {
       countdownRef.current = setInterval(() => {
-        setCountdownTime((prev) => prev - 1);
-      }, 1000);
-    } else if (countdownTime === 0 && isCountdownRunning) {
-      setIsCountdownRunning(false);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
-        navigator.vibrate([200, 100, 200]);
-      }
+        setCountdownMs((prev) => {
+          if (prev <= 10) {
+            setIsCountdownRunning(false);
+            if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+              navigator.vibrate([200, 100, 200]);
+            }
+            return 0;
+          }
+          return prev - 10;
+        });
+      }, 10);
     } else if (countdownRef.current) {
       clearInterval(countdownRef.current);
     }
     return () => {
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, [isCountdownRunning, countdownTime]);
+  }, [isCountdownRunning, countdownMs]);
 
   const isFutureDate = useMemo(() => {
     if (!selectedDateStr || !todayDateStr) return false;
@@ -167,7 +183,6 @@ export default function GymTrackerApp() {
     const { data: days } = await supabase.from('routine_days').select('*').order('id');
     const { data: exs } = await supabase.from('exercises').select('*').order('sort_order');
     
-    // Consultar fechas con datos reales
     const { data: logsWithSets } = await supabase
       .from('workout_logs')
       .select('workout_date, workout_sets(id)');
@@ -190,12 +205,10 @@ export default function GymTrackerApp() {
     setLoading(false);
   };
 
-  // Carga los datos dentro de las casillas de la fecha y día
   const loadDayData = async (exList: Exercise[], targetDate: string, dayId: number) => {
     const localDraftKey = `workout_draft_${targetDate}_${dayId}`;
     const localDraft = typeof window !== 'undefined' ? localStorage.getItem(localDraftKey) : null;
 
-    // Buscar logs tanto por fecha exacta como por el día si se guardó recientemente
     const { data: existingLogs } = await supabase
       .from('workout_logs')
       .select('id, exercise_id, workout_date, workout_sets(set_number, weight, unit, reps)')
@@ -257,7 +270,6 @@ export default function GymTrackerApp() {
     if (data) setAllHistory(data);
   };
 
-  // Cambio de pestaña de día (LUN a VIE) -> recalcula la fecha de ese día de la semana
   const handleSelectDay = (dayId: number) => {
     setSelectedDayId(dayId);
     const calculatedDate = getDateOfWeekDay(dayId);
@@ -374,7 +386,6 @@ export default function GymTrackerApp() {
     }
   };
 
-  // Gestión de Ejercicios
   const openModalNewExercise = () => {
     setEditingExercise(null);
     setModalExName('');
@@ -479,6 +490,7 @@ export default function GymTrackerApp() {
 
   const currentExercises = exercises.filter((ex) => ex.day_id === selectedDayId);
   const currentDayInfo = routineDays.find((d) => d.id === selectedDayId);
+  const selectedChartExercise = exercises.find((e) => e.id === chartExerciseId);
 
   const filledCount = useMemo(() => {
     return currentExercises.filter((ex) => {
@@ -487,31 +499,58 @@ export default function GymTrackerApp() {
     }).length;
   }, [currentExercises, formData]);
 
+  // Datos para la Gráfica
   const chartData = useMemo(() => {
     if (!chartExerciseId || allHistory.length === 0) return [];
     return allHistory
-      .filter((h) => h.exercise_id === chartExerciseId)
+      .filter((h) => h.exercise_id === chartExerciseId && h.workout_sets && h.workout_sets.length > 0)
       .map((h) => {
-        const maxWeight = Math.max(...(h.workout_sets?.map((s: any) => Number(s.weight)) || [0]));
-        const maxReps = Math.max(...(h.workout_sets?.map((s: any) => Number(s.reps)) || [0]));
+        const weights = h.workout_sets.map((s: any) => Number(s.weight));
+        const reps = h.workout_sets.map((s: any) => Number(s.reps));
+        const maxW = Math.max(...weights);
+        const maxR = Math.max(...reps);
         return {
           fecha: h.workout_date.slice(5),
-          pesoMax: maxWeight,
-          reps: maxReps,
-          unidad: h.workout_sets?.[0]?.unit || 'kg',
+          fullDate: h.workout_date,
+          pesoMax: maxW,
+          repsMax: maxR,
+          unidad: h.workout_sets[0]?.unit || 'kg',
         };
       })
       .reverse();
   }, [chartExerciseId, allHistory]);
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  // Métricas destacadas del ejercicio en Gráficas
+  const chartMetrics = useMemo(() => {
+    if (chartData.length === 0) return { maxWeight: 0, latestWeight: 0, latestReps: 0, unit: 'kg' };
+    const maxWeight = Math.max(...chartData.map((d) => d.pesoMax));
+    const latest = chartData[chartData.length - 1];
+    return {
+      maxWeight,
+      latestWeight: latest.pesoMax,
+      latestReps: latest.repsMax,
+      unit: latest.unidad,
+    };
+  }, [chartData]);
+
+  // Formato tiempo con 3 cifras (Minutos : Segundos . Milisegundos)
+  const formatTimeWithMs = (totalMs: number) => {
+    const m = Math.floor(totalMs / 60000);
+    const s = Math.floor((totalMs % 60000) / 1000);
+    const ms = Math.floor((totalMs % 1000) / 10);
+    return {
+      time: `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+      ms: String(ms).padStart(2, '0'),
+    };
   };
 
+  const filteredExercisesForPicker = useMemo(() => {
+    if (!pickerSearch.trim()) return exercises;
+    return exercises.filter((e) => e.name.toLowerCase().includes(pickerSearch.toLowerCase()));
+  }, [exercises, pickerSearch]);
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-36 font-sans">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-36 font-sans select-none">
       {/* Barra Superior */}
       <header className="sticky top-0 z-30 bg-zinc-900/90 backdrop-blur-md border-b border-zinc-800 px-4 py-3">
         <div className="max-w-xl mx-auto flex items-center justify-between">
@@ -526,9 +565,9 @@ export default function GymTrackerApp() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 bg-zinc-800 px-3 py-1.5 rounded-full border border-zinc-700/60">
-            <Flame className="w-4 h-4 text-orange-400" />
-            <span className="text-xs font-bold text-zinc-200">{completedDates.length} Días</span>
+          <div className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500/10 to-orange-500/20 px-3 py-1.5 rounded-full border border-amber-500/30">
+            <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span className="text-xs font-black text-amber-300">{streakDays} Días</span>
           </div>
         </div>
       </header>
@@ -674,7 +713,7 @@ export default function GymTrackerApp() {
               })
             )}
 
-            {/* BOTÓN MAESTRO DE GUARDAR ENTRENAMIENTO */}
+            {/* Botón Maestro de Guardar */}
             {currentExercises.length > 0 && (
               <div className="pt-2 pb-6">
                 <button
@@ -707,7 +746,7 @@ export default function GymTrackerApp() {
           </div>
         )}
 
-        {/* VISTA 2: CALENDARIO CON CHECK */}
+        {/* VISTA 2: CALENDARIO */}
         {activeTab === 'calendar' && (
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
             <div className="flex items-center justify-between mb-4">
@@ -767,44 +806,108 @@ export default function GymTrackerApp() {
           </div>
         )}
 
-        {/* VISTA 3: PROGRESO Y GRÁFICAS */}
+        {/* VISTA 3: PROGRESO Y GRÁFICAS RENOVADAS */}
         {activeTab === 'charts' && (
           <div className="space-y-4">
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-              <label className="text-xs font-semibold text-zinc-400 block mb-2">Selecciona un Ejercicio</label>
-              <select
-                value={chartExerciseId}
-                onChange={(e) => setChartExerciseId(e.target.value)}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-100 focus:outline-none"
-              >
-                {exercises.map((ex) => (
-                  <option key={ex.id} value={ex.id}>{ex.name}</option>
-                ))}
-              </select>
-            </div>
+            {/* Selector de Ejercicio Personalizado */}
+            <button
+              onClick={() => setIsPickerOpen(true)}
+              className="w-full bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-2xl p-4 flex items-center justify-between text-left transition shadow-sm"
+            >
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Ejercicio analizado</p>
+                <p className="text-sm font-bold text-amber-400 mt-0.5">
+                  {selectedChartExercise?.name || 'Selecciona un ejercicio'}
+                </p>
+              </div>
+              <div className="bg-zinc-950 p-2 rounded-xl border border-zinc-800 text-zinc-400">
+                <ChevronDown className="w-4 h-4" />
+              </div>
+            </button>
 
+            {/* Tarjetas Resumen */}
+            {chartData.length > 0 && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3.5">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase">Máximo Histórico</span>
+                  <div className="flex items-baseline gap-1 mt-1">
+                    <span className="text-xl font-black text-amber-400">{chartMetrics.maxWeight}</span>
+                    <span className="text-xs font-semibold text-zinc-400">{chartMetrics.unit}</span>
+                  </div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3.5">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase">Último Registro</span>
+                  <div className="flex items-baseline gap-1 mt-1">
+                    <span className="text-xl font-black text-cyan-400">{chartMetrics.latestWeight}</span>
+                    <span className="text-xs font-semibold text-zinc-400">{chartMetrics.unit} × {chartMetrics.latestReps}r</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Gráfica */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-              <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider mb-4">Evolución de Peso Máximo</h3>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-wider">Historial de Carga & Reps</h3>
+                <div className="flex gap-3 text-[10px] font-semibold">
+                  <span className="flex items-center gap-1 text-amber-400">
+                    <span className="w-2 h-2 rounded-full bg-amber-400"></span> Peso Máx
+                  </span>
+                  <span className="flex items-center gap-1 text-cyan-400">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400"></span> Reps
+                  </span>
+                </div>
+              </div>
+
               {chartData.length > 0 ? (
                 <div className="h-64 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                      <XAxis dataKey="fecha" stroke="#71717a" fontSize={10} />
-                      <YAxis stroke="#71717a" fontSize={10} />
-                      <Tooltip contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }} />
-                      <Line type="monotone" dataKey="pesoMax" stroke="#f59e0b" strokeWidth={3} dot={{ fill: '#f59e0b' }} />
+                    <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                      <XAxis dataKey="fecha" stroke="#71717a" fontSize={11} tickLine={false} />
+                      <YAxis stroke="#71717a" fontSize={11} tickLine={false} />
+                      <Tooltip 
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            const data = payload[0].payload;
+                            return (
+                              <div className="bg-zinc-950 border border-zinc-800 p-2.5 rounded-xl text-xs shadow-xl space-y-1">
+                                <p className="font-bold text-zinc-300">{data.fullDate}</p>
+                                <p className="text-amber-400">Peso Máx: <b>{data.pesoMax} {data.unidad}</b></p>
+                                <p className="text-cyan-400">Repeticiones: <b>{data.repsMax} reps</b></p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }} 
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="pesoMax" 
+                        stroke="#f59e0b" 
+                        strokeWidth={3} 
+                        dot={{ fill: '#f59e0b', r: 4 }} 
+                        activeDot={{ r: 6 }} 
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="repsMax" 
+                        stroke="#06b6d4" 
+                        strokeWidth={2} 
+                        strokeDasharray="4 4"
+                        dot={{ fill: '#06b6d4', r: 3 }} 
+                      />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <p className="text-xs text-zinc-500 text-center py-10">Sin datos registrados aún para este ejercicio.</p>
+                <p className="text-xs text-zinc-500 text-center py-12">Sin sesiones registradas aún para este ejercicio.</p>
               )}
             </div>
           </div>
         )}
 
-        {/* VISTA 4: CRONÓMETRO Y TEMPORIZADOR */}
+        {/* VISTA 4: CRONÓMETRO Y TEMPORIZADOR (3 CIFRAS / MILISEGUNDOS) */}
         {activeTab === 'timer' && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-2 bg-zinc-900 p-1.5 rounded-2xl border border-zinc-800">
@@ -826,11 +929,13 @@ export default function GymTrackerApp() {
               </button>
             </div>
 
+            {/* Temporizador */}
             {timerMode === 'countdown' && (
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center">
                 <p className="text-xs text-zinc-400 mb-2">Descanso entre series</p>
-                <div className="text-6xl font-black text-amber-400 tracking-wider my-4 font-mono">
-                  {formatTime(countdownTime)}
+                <div className="flex items-baseline justify-center my-4 font-mono font-black text-amber-400">
+                  <span className="text-5xl">{formatTimeWithMs(countdownMs).time}</span>
+                  <span className="text-2xl text-amber-400/60 ml-1">.{formatTimeWithMs(countdownMs).ms}</span>
                 </div>
 
                 <div className="grid grid-cols-5 gap-1.5 my-5">
@@ -839,11 +944,11 @@ export default function GymTrackerApp() {
                       key={sec}
                       onClick={() => {
                         setIsCountdownRunning(false);
-                        setCountdownTime(sec);
-                        setInitialCountdown(sec);
+                        setCountdownMs(sec * 1000);
+                        setInitialCountdownMs(sec * 1000);
                       }}
                       className={`py-2 rounded-xl text-xs font-bold border ${
-                        initialCountdown === sec
+                        initialCountdownMs === sec * 1000
                           ? 'bg-zinc-800 border-amber-400 text-amber-400'
                           : 'bg-zinc-950 border-zinc-800 text-zinc-400'
                       }`}
@@ -864,7 +969,7 @@ export default function GymTrackerApp() {
                   <button
                     onClick={() => {
                       setIsCountdownRunning(false);
-                      setCountdownTime(initialCountdown);
+                      setCountdownMs(initialCountdownMs);
                     }}
                     className="p-3 bg-zinc-800 text-zinc-300 rounded-2xl hover:bg-zinc-700 transition"
                   >
@@ -874,11 +979,13 @@ export default function GymTrackerApp() {
               </div>
             )}
 
+            {/* Cronómetro */}
             {timerMode === 'stopwatch' && (
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center">
                 <p className="text-xs text-zinc-400 mb-2">Tiempo transcurrido</p>
-                <div className="text-6xl font-black text-amber-400 tracking-wider my-6 font-mono">
-                  {formatTime(stopwatchTime)}
+                <div className="flex items-baseline justify-center my-6 font-mono font-black text-amber-400">
+                  <span className="text-5xl">{formatTimeWithMs(stopwatchMs).time}</span>
+                  <span className="text-2xl text-amber-400/60 ml-1">.{formatTimeWithMs(stopwatchMs).ms}</span>
                 </div>
 
                 <div className="flex justify-center gap-3">
@@ -892,7 +999,7 @@ export default function GymTrackerApp() {
                   <button
                     onClick={() => {
                       setIsStopwatchRunning(false);
-                      setStopwatchTime(0);
+                      setStopwatchMs(0);
                     }}
                     className="p-3 bg-zinc-800 text-zinc-300 rounded-2xl hover:bg-zinc-700 transition"
                   >
@@ -904,6 +1011,69 @@ export default function GymTrackerApp() {
           </div>
         )}
       </main>
+
+      {/* MODAL PERSONALIZADO: Selector de Ejercicio para Gráficas */}
+      {isPickerOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-t-3xl sm:rounded-3xl w-full max-w-md max-h-[80vh] flex flex-col p-5 shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-sm font-bold text-zinc-100">Selecciona un Ejercicio</h3>
+              <button onClick={() => setIsPickerOpen(false)} className="text-zinc-500 hover:text-white p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Buscador */}
+            <div className="relative mb-3">
+              <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-3" />
+              <input
+                type="text"
+                value={pickerSearch}
+                onChange={(e) => setPickerSearch(e.target.value)}
+                placeholder="Buscar ejercicio..."
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            {/* Lista por Grupos */}
+            <div className="overflow-y-auto space-y-3 flex-1 pr-1">
+              {routineDays.map((day) => {
+                const dayExs = filteredExercisesForPicker.filter((e) => e.day_id === day.id);
+                if (dayExs.length === 0) return null;
+                return (
+                  <div key={day.id} className="space-y-1.5">
+                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider px-1">
+                      {day.day_name} • {day.muscle_group}
+                    </p>
+                    <div className="space-y-1">
+                      {dayExs.map((ex) => {
+                        const isSelected = ex.id === chartExerciseId;
+                        return (
+                          <button
+                            key={ex.id}
+                            onClick={() => {
+                              setChartExerciseId(ex.id);
+                              setIsPickerOpen(false);
+                            }}
+                            className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between transition ${
+                              isSelected
+                                ? 'bg-amber-500 text-zinc-950 font-bold'
+                                : 'bg-zinc-950 hover:bg-zinc-800 text-zinc-300'
+                            }`}
+                          >
+                            <span>{ex.name}</span>
+                            <span className="text-[10px] uppercase opacity-75">{ex.default_unit}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal para Crear / Editar Ejercicios */}
       {modalExerciseOpen && (
