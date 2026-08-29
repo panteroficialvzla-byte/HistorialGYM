@@ -4,6 +4,8 @@ import React from 'react';
 import { useStore } from '@/lib/store';
 import RutinaApp from './RutinaApp';
 import PanelEntrenador from './PanelEntrenador';
+import VistaDieta from './VistaDieta';
+import VistaChat from './VistaChat';
 import { Dumbbell, Calendar, TrendingUp, Timer, Utensils, MessageCircle, Users } from 'lucide-react';
 
 export default function MainApp() {
@@ -18,8 +20,8 @@ export default function MainApp() {
       <main className="h-full">
         {isGymTab && <RutinaApp />}
         
-        {activeTab === 'dieta' && <div className="p-8 text-center mt-20 text-zinc-500 font-bold">Dietas y PDFs (En construcción)</div>}
-        {activeTab === 'chat' && <div className="p-8 text-center mt-20 text-zinc-500 font-bold">Chat en Vivo (En construcción)</div>}
+        {activeTab === 'dieta' && <VistaDieta />}
+        {activeTab === 'chat' && <VistaChat />}
         
         {activeTab === 'clientes' && profile?.rol === 'admin' && <PanelEntrenador />}
       </main>
