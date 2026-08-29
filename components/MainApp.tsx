@@ -6,23 +6,21 @@ import RutinaApp from './RutinaApp';
 import PanelEntrenador from './PanelEntrenador';
 import VistaDieta from './VistaDieta';
 import VistaChat from './VistaChat';
-import { Dumbbell, Calendar, TrendingUp, Timer, Utensils, MessageCircle, Users } from 'lucide-react';
+import VistaPerfil from './VistaPerfil';
+import { Dumbbell, Calendar, TrendingUp, Timer, Utensils, MessageCircle, Users, User } from 'lucide-react';
 
 export default function MainApp() {
   const { profile, activeTab, setActiveTab } = useStore();
 
-  // Si estás en cualquiera de estas 4 pestañas, mostramos tu RutinaApp
   const isGymTab = ['rutina', 'calendario', 'progreso', 'descanso'].includes(activeTab);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 pb-24">
-      
       <main className="h-full">
         {isGymTab && <RutinaApp />}
-        
         {activeTab === 'dieta' && <VistaDieta />}
         {activeTab === 'chat' && <VistaChat />}
-        
+        {activeTab === 'perfil' && <VistaPerfil />}
         {activeTab === 'clientes' && profile?.rol === 'admin' && <PanelEntrenador />}
       </main>
 
@@ -34,6 +32,7 @@ export default function MainApp() {
           <NavButton id="descanso" current={activeTab} icon={Timer} label="Descanso" onClick={() => setActiveTab('descanso')} />
           <NavButton id="dieta" current={activeTab} icon={Utensils} label="Dieta" onClick={() => setActiveTab('dieta')} />
           <NavButton id="chat" current={activeTab} icon={MessageCircle} label="Chat" onClick={() => setActiveTab('chat')} />
+          <NavButton id="perfil" current={activeTab} icon={User} label="Perfil" onClick={() => setActiveTab('perfil')} />
           
           {profile?.rol === 'admin' && (
             <NavButton id="clientes" current={activeTab} icon={Users} label="Clientes" onClick={() => setActiveTab('clientes')} adminColor />
