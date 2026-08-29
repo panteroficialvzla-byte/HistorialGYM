@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useStore } from '@/lib/store';
 import RutinaApp from '@/components/RutinaApp';
+import AdminDashboard from '@/components/AdminDashboard'; // <-- ESTA ES LA LÍNEA QUE FALTABA
 import { Dumbbell, Mail, Lock, User, ArrowRight, Loader2, LogOut } from 'lucide-react';
 
 const GYM_AVATARS = [
@@ -192,16 +193,13 @@ export default function AppShell() {
     );
   }
 
-  // 3. Aplicación Principal
+  // 3. Aplicación Principal (Enrutamiento según el Rol)
+  if (profile?.rol === 'admin') {
+    return <AdminDashboard />;
+  }
+
   return (
     <div className="relative">
-      <button 
-        onClick={logout}
-        className="absolute top-3 right-4 z-50 p-2 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-400 hover:text-red-400 transition"
-      >
-        <LogOut className="w-4 h-4" />
-      </button>
-
       <RutinaApp />
     </div>
   );
