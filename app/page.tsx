@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useStore } from '@/lib/store';
 import RutinaApp from '@/components/RutinaApp';
-import AdminDashboard from '@/components/AdminDashboard'; // <-- ESTA ES LA LÍNEA QUE FALTABA
+import AdminDashboard from '@/components/AdminDashboard';
 import { Dumbbell, Mail, Lock, User, ArrowRight, Loader2, LogOut } from 'lucide-react';
 
 const GYM_AVATARS = [
@@ -20,25 +20,32 @@ export default function AppShell() {
   const { session, profile, setSession, fetchProfile, logout } = useStore();
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Estados de Auth (Solo Login)
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Estados de Onboarding
   const [nombre, setNombre] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(GYM_AVATARS[0]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
-      if (session?.user) fetchProfile(session.user.id);
+      if (session?.user) {
+        await fetchProfile(session.user.id);
+      }
       setIsInitializing(false);
-    });
+    };
+    
+    initAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
-      if (session?.user) fetchProfile(session.user.id);
+      if (session?.user) {
+        await fetchProfile(session.user.id);
+      } else {
+        useStore.setState({ profile: null });
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -63,8 +70,12 @@ export default function AppShell() {
     try {
       const { error } = await supabase
         .from('perfiles')
-        .update({ nombre_completo: nombre, avatar_url: selectedAvatar })
-        .eq('id', session.user.id);
+        .upsert({ 
+          id: session.user.id, 
+          nombre_completo: nombre, 
+          avatar_url: selectedAvatar,
+          rol: 'cliente' 
+        });
       
       if (error) throw error;
       await fetchProfile(session.user.id);
@@ -83,7 +94,6 @@ export default function AppShell() {
     );
   }
 
-  // 1. Pantalla de Login (Sin registro)
   if (!session) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-6">
@@ -140,8 +150,7 @@ export default function AppShell() {
     );
   }
 
-  // 2. Pantalla de Onboarding (Nombre y Avatar)
-  if (session && profile && (!profile.nombre_completo || !profile.avatar_url)) {
+  if (session && (!profile || !profile.nombre_completo || !profile.avatar_url)) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-3xl p-8 shadow-2xl">
@@ -193,7 +202,6 @@ export default function AppShell() {
     );
   }
 
-  // 3. Aplicación Principal (Enrutamiento según el Rol)
   if (profile?.rol === 'admin') {
     return <AdminDashboard />;
   }
