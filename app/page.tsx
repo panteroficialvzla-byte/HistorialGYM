@@ -19,10 +19,9 @@ export default function AppShell() {
   const { session, profile, setSession, fetchProfile, logout } = useStore();
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Estados de Auth
+  // Estados de Auth (Solo Login)
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLogin, setIsLogin] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
 
   // Estados de Onboarding
@@ -44,20 +43,14 @@ export default function AppShell() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
     try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        alert('Registro exitoso. Iniciando sesión...');
-      }
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
     } catch (error: any) {
-      alert(error.message);
+      alert('Error al iniciar sesión: ' + error.message);
     } finally {
       setAuthLoading(false);
     }
@@ -89,7 +82,7 @@ export default function AppShell() {
     );
   }
 
-  // 1. Pantalla de Login / Registro
+  // 1. Pantalla de Login (Sin registro)
   if (!session) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-6">
@@ -98,11 +91,11 @@ export default function AppShell() {
             <div className="bg-amber-500/10 p-4 rounded-full border border-amber-500/20 mb-4">
               <Dumbbell className="w-8 h-8 text-amber-500" />
             </div>
-            <h1 className="text-xl font-black text-white tracking-wider">G.I. FIT JOSE</h1>
+            <h1 className="text-xl font-black text-white tracking-wider">G.I. FIT</h1>
             <p className="text-xs text-zinc-400 mt-1">Bitácora de Misiones Diarias</p>
           </div>
 
-          <form onSubmit={handleAuth} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider pl-1">Correo Electrónico</label>
               <div className="relative mt-1">
@@ -138,18 +131,9 @@ export default function AppShell() {
               disabled={authLoading}
               className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 mt-2"
             >
-              {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (isLogin ? 'Entrar al Sistema' : 'Crear Cuenta')}
+              {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Entrar al Sistema'}
             </button>
           </form>
-
-          <div className="mt-6 text-center">
-            <button
-              onClick={() => setIsLogin(!isLogin)}
-              className="text-xs text-zinc-400 hover:text-amber-400 transition"
-            >
-              {isLogin ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya tienes cuenta? Inicia sesión'}
-            </button>
-          </div>
         </div>
       </div>
     );
@@ -211,7 +195,6 @@ export default function AppShell() {
   // 3. Aplicación Principal
   return (
     <div className="relative">
-      {/* Botón temporal de Logout para pruebas */}
       <button 
         onClick={logout}
         className="absolute top-3 right-4 z-50 p-2 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-400 hover:text-red-400 transition"
@@ -219,7 +202,6 @@ export default function AppShell() {
         <LogOut className="w-4 h-4" />
       </button>
 
-      {/* Aquí renderizamos tu código original resguardado */}
       <RutinaApp />
     </div>
   );
