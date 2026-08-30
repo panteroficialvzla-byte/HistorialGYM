@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useStore } from '@/lib/store';
-import { Plus, Pencil, Trash2, Save, CheckCircle2, Play, Square, RotateCcw, Search, ChevronDown, Activity, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Pencil, Trash2, Save, CheckCircle2, Play, Pause, Square, RotateCcw, Search, ChevronDown, Activity, ChevronLeft, ChevronRight, Dumbbell, Flame, LogOut, X } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 interface Exercise { id: string; day_id: number; name: string; default_unit: 'kg' | 'placas'; sort_order: number; }

@@ -6,7 +6,7 @@ import RutinaApp from './RutinaApp';
 import PanelEntrenador from './PanelEntrenador';
 import VistaDieta from './VistaDieta';
 import VistaChat from './VistaChat';
-import { Dumbbell, Calendar, TrendingUp, Timer, Utensils, MessageCircle, Users, Menu, X, LogOut, ChevronRight } from 'lucide-react';
+import { Dumbbell, Calendar, TrendingUp, Timer, Utensils, MessageCircle, Users, Menu, X, LogOut, ChevronRight, User } from 'lucide-react';
 
 export default function MainApp() {
   const { profile, activeTab, setActiveTab, viewingClientId, setViewingClientId, logout } = useStore();
