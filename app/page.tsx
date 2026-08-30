@@ -20,7 +20,6 @@ export default function AppShell() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Formularios
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nombre, setNombre] = useState('');
@@ -35,12 +34,13 @@ export default function AppShell() {
     };
     initAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
       if (session?.user) {
         await fetchProfile(session.user.id);
       } else {
         useStore.setState({ profile: null });
+        if (event === 'SIGNED_OUT') window.location.reload(); // Limpieza dura al salir
       }
     });
 
@@ -51,8 +51,13 @@ export default function AppShell() {
     e.preventDefault();
     setAuthLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      // Forzar carga inmediata sin esperar al listener
+      if (data.session) {
+        setSession(data.session);
+        await fetchProfile(data.user.id);
+      }
     } catch (error: any) {
       alert('Error al iniciar sesión: Verifique sus credenciales.');
     } finally {
@@ -68,7 +73,7 @@ export default function AppShell() {
         id: session.user.id, 
         nombre_completo: nombre, 
         avatar_url: selectedAvatar,
-        rol: profile?.rol || 'cliente' // Mantiene tu rol de admin si ya lo tienes
+        rol: profile?.rol || 'cliente' 
       });
       if (error) throw error;
       await fetchProfile(session.user.id);
@@ -79,11 +84,8 @@ export default function AppShell() {
     }
   };
 
-  if (isInitializing) {
-    return <div className="min-h-screen bg-zinc-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-amber-500 animate-spin" /></div>;
-  }
+  if (isInitializing) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center"><Loader2 className="w-8 h-8 text-amber-500 animate-spin" /></div>;
 
-  // 1. LOGIN (Solo acceso, sin registro público)
   if (!session) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-6">
@@ -92,22 +94,18 @@ export default function AppShell() {
             <div className="bg-amber-500/10 p-4 rounded-full border border-amber-500/20 mb-4">
               <Dumbbell className="w-8 h-8 text-amber-500" />
             </div>
-            <h1 className="text-xl font-black text-white tracking-wider text-center">G.I. FIT JOSE</h1>
+            <h1 className="text-xl font-black text-white tracking-wider text-center">G.I. FIT</h1>
             <p className="text-xs text-zinc-400 mt-1 text-center">Bitácora de Misiones Diarias</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <div className="relative mt-1">
-                <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-3.5" />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 transition" placeholder="Correo Electrónico" required />
-              </div>
+            <div className="relative mt-1">
+              <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-3.5" />
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 transition" placeholder="Correo Electrónico" required />
             </div>
-            <div>
-              <div className="relative mt-1">
-                <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3.5" />
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 transition" placeholder="Contraseña" required />
-              </div>
+            <div className="relative mt-1">
+              <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3.5" />
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 transition" placeholder="Contraseña" required />
             </div>
             <button type="submit" disabled={authLoading} className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 mt-2">
               {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Ingresar'}
@@ -118,7 +116,6 @@ export default function AppShell() {
     );
   }
 
-  // 2. ONBOARDING (Nombre y Avatar la primera vez)
   if (session && (!profile || !profile.nombre_completo || !profile.avatar_url)) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-center p-6">
@@ -132,11 +129,9 @@ export default function AppShell() {
               </button>
             ))}
           </div>
-          <div className="mb-6">
-            <div className="relative mt-1">
-              <User className="w-4 h-4 text-zinc-500 absolute left-3 top-3.5" />
-              <input type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 transition" placeholder="Tu Nombre Completo" />
-            </div>
+          <div className="relative mt-1 mb-6">
+            <User className="w-4 h-4 text-zinc-500 absolute left-3 top-3.5" />
+            <input type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 transition" placeholder="Tu Nombre Completo" />
           </div>
           <button onClick={saveOnboarding} disabled={authLoading} className="w-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2">
             {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><span>Comenzar</span><ArrowRight className="w-4 h-4" /></>}
@@ -146,6 +141,5 @@ export default function AppShell() {
     );
   }
 
-  // 3. CARGAR LA APP PRINCIPAL
   return <MainApp />;
 }

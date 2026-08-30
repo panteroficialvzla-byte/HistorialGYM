@@ -126,11 +126,10 @@ export default function RutinaApp() {
     setStopwatchStart(null);
   };
 
+  // Calcula los días reales en los que has guardado un entrenamiento
   const streakDays = useMemo(() => {
-    const diffTime = Math.max(0, new Date().getTime() - new Date('2026-08-10T00:00:00').getTime());
-    const days = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    return days > 0 ? days : 17;
-  }, []);
+    return completedDates.length;
+  }, [completedDates]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -318,7 +317,7 @@ export default function RutinaApp() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500/10 to-orange-500/20 px-3 py-1.5 rounded-full border border-amber-500/30">
-            <Flame className="w-4 h-4 text-amber-400 animate-pulse" /><span className="text-xs font-black text-amber-300">{streakDays} Días</span>
+            <Flame className="w-4 h-4 text-amber-400 animate-pulse" /><span className="text-xs font-black text-amber-300">{streakDays} Entrenos</span>
           </div>
           <button onClick={logout} className="p-1.5 text-zinc-500 hover:text-red-400"><LogOut className="w-5 h-5" /></button>
         </div>
